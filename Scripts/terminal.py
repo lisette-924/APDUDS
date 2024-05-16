@@ -7,7 +7,7 @@ This file contains the following major functions:
 
     * area_check - Prints a warning if an area is above a certain threshold
     * yes_no_choice - Presents a yes no [y/n] input space to the user
-    * step_1_input - Create the explanations and input space for the network creatin step
+    * step_1_input - Create the explanations and input space for the network creating step
     * step_2_input - Determines if the user would like to compute multiple variants
     * variant_input - User may enter input for several possible variants
     * standard_input - User may enter input for just one design
@@ -15,6 +15,7 @@ This file contains the following major functions:
     * design_choice & uncertain_choice - User can tell system their preffered design
     * tester - Only used for testing purposes
 """
+import osmnx as ox
 from numpy import (cos, sin, pi, array)
 from vg import angle
 
@@ -90,7 +91,7 @@ def coords_input() -> list[float]:
         list[float]: north, south, east and west coordinates
         area[float]: Area of the giving bounding box
     """
-
+    # Check for correct input
     try:
         north = float(input("Enter coordinates of the most northern point: "))
         south = float(input("Enter coordinates of the most southern point: "))
@@ -100,6 +101,15 @@ def coords_input() -> list[float]:
 
     except ValueError:
         print("\nThe input was not in the correct format (ex: 51.592)\nPlease try again:\n")
+        coords = coords_input()
+
+    # Check presence of water within coordinates
+    try:
+        ox.graph_from_bbox(*coords, truncate_by_edge=True, retain_all=True, custom_filter="['natural'~'water']")
+
+    except ValueError:
+        print("\nThere is no water found in the given area, so no overflow can be placed\n")
+        print("Please try again with different coordinates:\n")
         coords = coords_input()
 
     # If north was entered in the south entry space, swap them
@@ -192,7 +202,7 @@ create multiple networks for the given area or not.")
 design choices such as minimum depth and overflow points. From these variants you may \n\
 pick one favourite with which variants for different design storms and ground \n\
 imperviousness will be created. From this one network can be selected and exported as a SWMM file.")
-    print("\nPlease enter wether you would like to make multiple iterations for the given area.")
+    print("\nPlease enter whether you would like to make multiple iterations for the given area.")
     choice = yes_no_choice()
 
     if choice == "n":
@@ -243,19 +253,6 @@ Please try again:\n")
         try:
             outfalls = input("Outfall point index: ").split()
             settings["outfalls"] = [int(x) for x in outfalls]
-        except ValueError:
-            print(f"\nThe value you entered is incorrect, please try again. \n\
-Make sure to enter in a correct format, as can be seen above in the example")
-            continue    
-        else:
-            break
-
-    print("\nThe indices of the points which you want to designate as overflow points:\n\
-(Positive integers separate by space, for example: 23 65 118)\n")
-    while True:
-        try:
-            overflows = input("Overflows points indices: ").split()      
-            settings["overflows"] = [int(x) for x in overflows]
         except ValueError:
             print(f"\nThe value you entered is incorrect, please try again. \n\
 Make sure to enter in a correct format, as can be seen above in the example")
@@ -399,18 +396,6 @@ Make sure to enter in a correct format, as can be seen above in the example")
         else:
             break
 
-    print("\nThe indices of the points which you want to designate as overflow points:\n\
-(Positive integers separate by space, for example: 23 65 118)\n")
-    while True:
-        try:
-            overflows = input("Overflows points indices: ").split()      
-            settings["overflows"] = [int(x) for x in overflows]
-        except ValueError:
-            print(f"\nThe value you entered is incorrect, please try again. \n\
-Make sure to enter in a correct format, as can be seen above in the example")
-            continue    
-        else:
-            break
             
 
     print("\nThe minimum depth below the ground at which conduits can be installed:\n\

@@ -19,7 +19,7 @@ from pandas import DataFrame
 from numpy import loadtxt
 from matplotlib import pyplot as plt
 from swmm_formater import swmm_file_creator
-from osm_extractor import extractor, fill_nan, cleaner
+from osm_extractor import extractor, fill_nan, cleaner, centralizer
 from plotter import network_plotter
 from terminal import step_1_input, step_2_input, step_3_input, area_check
 from variant import multiple_variant, single_variant
@@ -55,7 +55,8 @@ software after 5 minutes of no response....")
 
     print("\nCompleted the data gap fill, plotting graphs...")
     _ = plt.figure()
-    network_plotter(elevation_nodes, elevation_edges, 111, numbered=True)
+    central_nodes, central_edges = centralizer(elevation_nodes, elevation_edges)
+    network_plotter(central_nodes, central_edges, 111, numbered=True)
     print("\nNetwork creation process completed. \n\
 Please determine your preferred outfall and gitoverflow locations from the figure. \n\
 Then close the figure and proceed to the next step.")
@@ -63,7 +64,7 @@ Then close the figure and proceed to the next step.")
 
     return elevation_nodes, elevation_edges
 
-def step_2(nodes: DataFrame, edges: DataFrame, settings: dict, area: float, block: bool = True):
+def step_2(nodes: DataFrame, edges: DataFrame, settings: dict, area: float, coords: list, block: bool = True):
     """Initialises the calculation step of the software by determining if the user opted for 1 or more variants.
     
     Args:
@@ -79,10 +80,10 @@ def step_2(nodes: DataFrame, edges: DataFrame, settings: dict, area: float, bloc
  
     if settings["variants"] > 1:
         print("\nStarting the variation process...") 
-        nodes, edges, voro = multiple_variant(nodes, edges, settings, area, block)
+        nodes, edges, voro = multiple_variant(nodes, edges, settings, area, coords, block)
 
     else:
-        nodes, edges, voro = single_variant(nodes, edges, settings, block)  
+        nodes, edges, voro = single_variant(nodes, edges, settings, coords, block)  
 
     return nodes, edges, voro
 
@@ -111,7 +112,7 @@ def main():
 
     settings = step_2_input()
 
-    nodes, edges, voro = step_2(nodes, edges, settings, area)
+    nodes, edges, voro = step_2(nodes, edges, settings, area, coords)
 
     settings = step_3_input(settings)
     step_3(nodes, edges, voro, settings)
@@ -126,7 +127,7 @@ def tester():
     #Tuindorp right side
     test_coords = [52.11068, 52.09990, 5.14266, 5.131630] 
 
-    api_key = loadtxt('api_key.txt', dtype=str)
+    api_key = ''
 
 
     area = area_check(test_coords, 5)
@@ -136,7 +137,6 @@ def tester():
     test_settings = {"variants": 1,
                      "spacing": [70],
                      "outfalls":[36],
-                     "overflows":[113],
                      "min_depth": 1.0,
                      "min_slope": 0.001,
                      "peak_rain": 36,
@@ -147,9 +147,10 @@ def tester():
                      "duration": 2,
                      "polygons": "n"}
     
-    nodes, edges, voro = step_2(nodes, edges, test_settings, area, block=True)
+    nodes, edges, voro = step_2(nodes, edges, test_settings, area, test_coords, block=True)
 
     step_3(nodes, edges, voro, test_settings)
 
 if __name__ == "__main__":
     main()
+

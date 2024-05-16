@@ -58,7 +58,7 @@ def voronoi_plotter(nodes: DataFrame, voro, subplot_number: int):
     axes = plt.subplot(subplot_number)
     points = np.array([[nodes.x[i], nodes.y[i], 0] for i in range(len(nodes))])
 
-    voro.plot(ax=axes, color_by_sides=False)
+    voro.plot(ax=axes, color_by=None)
     axes.scatter(points[:, 0], points[:, 1])
 
     axes.set_title("Subcatchment Area for each Node")

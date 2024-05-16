@@ -5,9 +5,10 @@ environment you are running this script in.
 
 This file contains the following major functions:
 
+    * overflow_location - Finds the node which is closest to water
     * voronoi_area - Calculates the catchment area for each node using voronoi
     * adjusted_area - Re-calculates the area based on elevation of nearby nodes
-    * flow_and_height - Determinte the flow direction and set the node depth
+    * flow_and_height - Determine the flow direction and set the node depth
     * flow_amount - Determine the amount of water flow through each conduit
     * diameter_calc - Determine the appropriate diameter for eac conduit
     * uphold_min_depth - Moves all installation levels of pipes to correct location
@@ -16,12 +17,40 @@ This file contains the following major functions:
     * tester - Only used for testing purposes
 """
 
+import osmnx as ox
 import networkx as nx
 import pandas as pd
 from freud.box import Box
 from freud.locality import Voronoi
 import numpy as np
 from numpy import random as rnd
+from osm_extractor import centralizer
+
+def overflow_location(nodes: pd.DataFrame, coords: list):
+    """Determines the node which is closest to water
+
+    Args:
+        nodes (pd.DataFrame): The node data of a network
+        coords (list[float]): Coordinates of the bounding box
+
+    Returns:
+        int: id of the node closest to water
+    """
+    # import relevant objects from OpenStreetMap
+    cf = '["natural"~"water"]'
+    osm_map = ox.graph_from_bbox(*coords, truncate_by_edge=True, retain_all=True, custom_filter=cf)
+    osm_projected = ox.project_graph(osm_map)
+
+    # find distance to nearest edge/node in the graph of water objects for each node in the conduit network
+    dist_edges = ox.distance.nearest_edges(osm_projected, nodes.x, nodes.y, return_dist=True)[1]
+    dist_nodes = ox.distance.nearest_nodes(osm_projected, nodes.x, nodes.y, return_dist=True)[1]
+
+    # determine the id of the node which is closest to water
+    if min(dist_edges) < min(dist_nodes):
+        id = np.argmin(dist_edges) 
+    else:
+        id = np.argmin(dist_nodes)
+    return id
 
 def voronoi_area(nodes: pd.DataFrame, edges: pd.DataFrame):
     """Calculates the catchment area for the nodes using voronoi
@@ -498,7 +527,7 @@ def loop(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict, type: str):
     return nodes, edges
 
 
-def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
+def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict, coords: list):
     """Does the complete attribute calculation step for a given network
 
     Args:
@@ -510,6 +539,10 @@ def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: di
         tuple[DataFrame, DataFrame]: The node and conduit data with newly added and updated
         attribute values
     """
+    print(settings)
+    settings["overflows"] = [ overflow_location(nodes, coords) ]
+    print(settings)
+    nodes, edges = centralizer(nodes, edges)
     nodes, voro = voronoi_area(nodes, nodes)
     area = nodes.area.sum()
 
@@ -519,6 +552,7 @@ def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: di
     nodes, edges = loop(nodes, edges, settings, "outfall")
 
     loop_setting = settings.copy()
+    print(settings)
     for overflow in settings["overflows"]:
         loop_setting["outfalls"] = [overflow]
         _, loop_edges = loop(nodes_copy, edges_copy, loop_setting, "overflow")

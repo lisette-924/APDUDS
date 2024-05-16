@@ -23,7 +23,7 @@ from osm_extractor import splitter
 from plotter import voronoi_plotter, height_contour_plotter_datum, height_contour_plotter_local, diameter_map
 
 
-def multiple_variant(nodes: DataFrame, edges: DataFrame, settings: dict, area: float, block: bool = False):
+def multiple_variant(nodes: DataFrame, edges: DataFrame, settings: dict, area: float, coords: list, block: bool = False):
     """Initialises the calculation step for multiple variants by determining different settings per variant.
 
     Args:
@@ -31,6 +31,7 @@ def multiple_variant(nodes: DataFrame, edges: DataFrame, settings: dict, area: f
         edges (DataFrame): The conduit data for a network
         settings (dict): The parameters for a network
         area (float): The given area of the network
+        coords (list[float]): list with bounding box coordinates
 
     Returns:
         tuple[DataFrame, DataFrame, freud.locality.voronoi]: Node and conduit data with updated
@@ -72,7 +73,7 @@ of the design once all figures are closed.")
 
         print(f"\nAdjusting pipe diameter for uncertainties in rainfall and percentage impervious ground, design {j + 1}..")
         variants_uncertain[f"nodes_{j + 1}"], variants_uncertain[f"edges_{j + 1}"], variants_uncertain[f"voronoi_area_{j + 1}"] \
-            = attribute_calculation(nodes, edges, variants_uncertain[f"variant_{j + 1}"])    
+            = attribute_calculation(nodes, edges, variants_uncertain[f"variant_{j + 1}"], coords)    
 
         fig = plt.figure()
         voronoi_plotter(variants_uncertain[f"nodes_{j + 1}"], variants_uncertain[f"voronoi_area_{j + 1}"], 221)
@@ -96,7 +97,7 @@ of the design once all figures are closed.")
 
     return nodes, edges, voro
 
-def single_variant(nodes: DataFrame, edges: DataFrame, settings: dict, block: bool = False):
+def single_variant(nodes: DataFrame, edges: DataFrame, settings: dict, coords: list, block: bool = False):
     """Initialises the calculation step for just one variant.
 
     Args:
@@ -111,7 +112,7 @@ def single_variant(nodes: DataFrame, edges: DataFrame, settings: dict, block: bo
 
     nodes, edges = splitter(nodes, edges, settings["spacing"])
 
-    nodes, edges, voro = attribute_calculation(nodes, edges, settings)
+    nodes, edges, voro = attribute_calculation(nodes, edges, settings, coords)
 
     print("\nCompleted the attribute calculations, plotting graphs...")
     fig = plt.figure()        
@@ -148,7 +149,7 @@ def variation_design(settings: dict, area: float):
     if area > 4:    #If area larger than 4 km^2 pick between 2 and 4 overflows
         random_settings["overflows"] = rnd.choice(settings["overflows"], \
                                                   rnd.random_integers(2, min(4, len(settings["overflows"]))), replace=True)
-    elif area > 1:  #If between 1 and 3 km^2 pick between 1 and 3
+    elif area > 1:  #If between 1 and 4 km^2 pick between 1 and 3
         random_settings["overflows"] = rnd.choice(settings["overflows"], rnd.random_integers(1, 3), replace=True)
     else:           #Else pick 1 overflow
         random_settings["overflows"] = rnd.choice(settings["overflows"], 1, replace=True)

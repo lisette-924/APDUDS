@@ -119,9 +119,9 @@ def fill_nan(nodes: pd.DataFrame, edges: pd.DataFrame):
 
     return nodes, edges
 
-def cleaner(nodes: pd.DataFrame, edges: pd.DataFrame):
-    """Standerdizes and cleans the data downloaded from OpenStreetMap by the extractor
-
+def centralizer(nodes: pd.DataFrame, edges: pd.DataFrame):
+    """Centralizes the x- and y-values such that the middle of the graph is point (0,0)
+    
     Args:
         nodes (pd.DataFrame): The node data for a network
         edges (pd.DataFrame): The conduit data for a network
@@ -143,6 +143,21 @@ def cleaner(nodes: pd.DataFrame, edges: pd.DataFrame):
 
     nodes.x = nodes.x.round(decimals=2)
     nodes.y = nodes.y.round(decimals=2)
+    return nodes, edges
+
+def cleaner(nodes: pd.DataFrame, edges: pd.DataFrame):
+    """Cleans the data downloaded from OpenStreetMap by the extractor
+
+    Args:
+        nodes (pd.DataFrame): The node data for a network
+        edges (pd.DataFrame): The conduit data for a network
+
+    Returns:
+        tuple[DataFrame, DataFrame]: The node and conduit data with cleaned values
+    """
+
+    nodes = nodes.copy()
+    edges = edges.copy()
 
     # Duplicate edges may exist. These need to be filtered out
     combos = []
