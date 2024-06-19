@@ -18,7 +18,7 @@ from numpy import concatenate as concatenate
 import matplotlib.pyplot as plt
 from pandas import DataFrame
 from attribute_calculator import attribute_calculation 
-from terminal import design_choice, uncertain_choice, settings_uncertainty
+from terminal import design_choice, uncertain_choice, settings_uncertainty, overflow_choice, outfall_choice
 from osm_extractor import splitter
 from plotter import voronoi_plotter, height_contour_plotter_datum, height_contour_plotter_local, diameter_map
 
@@ -44,6 +44,8 @@ def multiple_variant(nodes: DataFrame, edges: DataFrame, settings: dict, area: f
     for j in range(settings["variants"]):
         variants_design[f"variant_{j + 1}"] = variation_design(settings, area)
         nodes_split, edges_split = splitter(nodes, edges, variants_design[f"variant_{j + 1}"]["spacing"])
+        outfall_choice(nodes, edges, variants_design[f"variant_{j + 1}"])
+        overflow_choice(nodes_split, edges_split, coords, variants_design[f"variant_{j + 1}"])
         print(f"\nStarting the attribute calculation step for variant {j + 1}...")
         variants_design[f"nodes_{j +1 }"], variants_design[f"edges_{j + 1}"], variants_design[f"voronoi_area_{j + 1}"] \
             = attribute_calculation(nodes_split, edges_split, variants_design[f"variant_{j + 1}"])
@@ -70,10 +72,11 @@ of the design once all figures are closed.")
     for j in range(settings["variants"]):
         variants_uncertain[f"variant_{j + 1}"] = variation_uncertainty(settings)
         nodes, edges = splitter(nodes, edges, variants_uncertain[f"variant_{j + 1}"]["spacing"])
-
+        outfall_choice(nodes, edges, variants_design[f"variant_{j + 1}"])
+        overflow_choice(nodes, edges, coords, variants_uncertain[f"variant_{j + 1}"])
         print(f"\nAdjusting pipe diameter for uncertainties in rainfall and percentage impervious ground, design {j + 1}..")
         variants_uncertain[f"nodes_{j + 1}"], variants_uncertain[f"edges_{j + 1}"], variants_uncertain[f"voronoi_area_{j + 1}"] \
-            = attribute_calculation(nodes, edges, variants_uncertain[f"variant_{j + 1}"], coords)    
+            = attribute_calculation(nodes, edges, variants_uncertain[f"variant_{j + 1}"])    
 
         fig = plt.figure()
         voronoi_plotter(variants_uncertain[f"nodes_{j + 1}"], variants_uncertain[f"voronoi_area_{j + 1}"], 221)
@@ -111,16 +114,17 @@ def single_variant(nodes: DataFrame, edges: DataFrame, settings: dict, coords: l
     """
 
     nodes, edges = splitter(nodes, edges, settings["spacing"])
-
-    nodes, edges, voro = attribute_calculation(nodes, edges, settings, coords)
+    outfall_choice(nodes, edges, settings)
+    overflow_choice(nodes, edges, coords, settings)
+    nodes, edges, voro = attribute_calculation(nodes, edges, settings)
 
     print("\nCompleted the attribute calculations, plotting graphs...")
     fig = plt.figure()        
-    voronoi_plotter(nodes, voro, 221)
-    height_contour_plotter_local(nodes, edges, 222, fig)
-    height_contour_plotter_datum(nodes, edges, 224, fig)
-    diameter_map(nodes, edges, 223)
-    fig.suptitle(f"Design {1}")
+    voronoi_plotter(nodes, voro, 121)
+    #height_contour_plotter_local(nodes, edges, 222, fig)
+    #height_contour_plotter_datum(nodes, edges, 224, fig)
+    diameter_map(nodes, edges, 122)
+    fig.suptitle(f"Design 1")
     fig.tight_layout()
 
     plt.show(block=block)
@@ -146,14 +150,6 @@ def variation_design(settings: dict, area: float):
     random_settings["min_depth"] = rnd.choice(settings["min_depth"], 1)[0]
     random_settings["min_slope"] = rnd.choice(settings["min_slope"], 1)[0]
 
-    if area > 4:    #If area larger than 4 km^2 pick between 2 and 4 overflows
-        random_settings["overflows"] = rnd.choice(settings["overflows"], \
-                                                  rnd.random_integers(2, min(4, len(settings["overflows"]))), replace=True)
-    elif area > 1:  #If between 1 and 4 km^2 pick between 1 and 3
-        random_settings["overflows"] = rnd.choice(settings["overflows"], rnd.random_integers(1, 3), replace=True)
-    else:           #Else pick 1 overflow
-        random_settings["overflows"] = rnd.choice(settings["overflows"], 1, replace=True)
-    
     if "max_slope" in settings:
         while True:
             random_settings["max_slope"] = rnd.choice(settings["max_slope"], 1)[0]

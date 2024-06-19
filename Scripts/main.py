@@ -16,11 +16,9 @@ This file contains the following functions:
 
 import warnings
 from pandas import DataFrame
-from numpy import loadtxt
 from matplotlib import pyplot as plt
 from swmm_formater import swmm_file_creator
 from osm_extractor import extractor, fill_nan, cleaner, centralizer
-from plotter import network_plotter
 from terminal import step_1_input, step_2_input, step_3_input, area_check
 from variant import multiple_variant, single_variant
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -53,14 +51,9 @@ software after 5 minutes of no response....")
     elevation_nodes, elevation_edges = fill_nan(clean_nodes, clean_edges)
 
 
-    print("\nCompleted the data gap fill, plotting graphs...")
-    _ = plt.figure()
-    central_nodes, central_edges = centralizer(elevation_nodes, elevation_edges)
-    network_plotter(central_nodes, central_edges, 111, numbered=True)
-    print("\nNetwork creation process completed. \n\
-Please determine your preferred outfall and gitoverflow locations from the figure. \n\
-Then close the figure and proceed to the next step.")
-    plt.show(block=block)
+    print("\nCompleted the data gap fill")
+    
+    print("\nNetwork initialisation completed. \n")
 
     return elevation_nodes, elevation_edges
 
@@ -97,7 +90,7 @@ def step_3(nodes: DataFrame, edges: DataFrame, voro, settings: dict):
         settings (dict): The parameters for a network
     """
     print("\nStarting the SWMM file creation...")
-    swmm_file_creator(nodes, edges, voro, settings)
+    swmm_file_creator(nodes, edges, voro, settings, False)
     print("Completed the SWMM file creation.")
 
 
@@ -109,13 +102,13 @@ def main():
     coords, api_key, area = step_1_input()
     nodes, edges = step_1(coords, api_key)
 
-
     settings = step_2_input()
 
     nodes, edges, voro = step_2(nodes, edges, settings, area, coords)
 
     settings = step_3_input(settings)
-    step_3(nodes, edges, voro, settings)
+
+    print(f'This concludes this session of APDUDS, you can find the swmm-file in the project folder')
 
 
 
@@ -124,11 +117,13 @@ def tester():
     while skipping the terminal interaction stage.
     """
 
-    #Tuindorp right side
-    test_coords = [52.11068, 52.09990, 5.14266, 5.131630] 
+
+    test_coords1 = [52.11068, 52.09990, 5.14266, 5.131630] # Tuindorp 1
+    
 
     api_key = ''
 
+    test_coords = test_coords1
 
     area = area_check(test_coords, 5)
     nodes, edges = step_1(test_coords, api_key)
@@ -139,7 +134,7 @@ def tester():
                      "outfalls":[36],
                      "min_depth": 1.0,
                      "min_slope": 0.001,
-                     "peak_rain": 36,
+                     "peak_rain": 23,
                      "perc_inp": 55,
                      "diam_list": [0.20, 0.35, 0.50, 0.65, 0.80, 0.95, 1.10, 1.25, 1.4, 1.55, 1.7, 1.85, 1.9, 2.05, 2.20, 2.35, 2.50, 2.65, 2.80, 2.95],
                      "filename": "test_swmm",
@@ -148,8 +143,6 @@ def tester():
                      "polygons": "n"}
     
     nodes, edges, voro = step_2(nodes, edges, test_settings, area, test_coords, block=True)
-
-    step_3(nodes, edges, voro, test_settings)
 
 if __name__ == "__main__":
     main()

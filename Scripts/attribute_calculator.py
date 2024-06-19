@@ -8,11 +8,12 @@ This file contains the following major functions:
     * overflow_location - Finds the node which is closest to water
     * voronoi_area - Calculates the catchment area for each node using voronoi
     * adjusted_area - Re-calculates the area based on elevation of nearby nodes
-    * flow_and_height - Determine the flow direction and set the node depth
+    * flow_and_depth - Determine the flow direction and set the node depth
     * flow_amount - Determine the amount of water flow through each conduit
     * diameter_calc - Determine the appropriate diameter for eac conduit
     * uphold_min_depth - Moves all installation levels of pipes to correct location
-    * cleaner_and_trimmer - Remove intermediate information and precision from the data
+    * cleaner_and_trimmer - Remove intermediate information and precision from the data, calculate path to overflow for each node
+    * pump_capacity - Calculates the needed capacity for a pump 
     * attribute_calculations - Runs the entire attribute calculation process
     * tester - Only used for testing purposes
 """
@@ -23,8 +24,10 @@ import pandas as pd
 from freud.box import Box
 from freud.locality import Voronoi
 import numpy as np
-from numpy import random as rnd
 from osm_extractor import centralizer
+from swmm_formater import swmm_file_creator
+from autom_sizing import attr_sizing
+import terminal
 
 def overflow_location(nodes: pd.DataFrame, coords: list):
     """Determines the node which is closest to water
@@ -36,6 +39,8 @@ def overflow_location(nodes: pd.DataFrame, coords: list):
     Returns:
         int: id of the node closest to water
     """
+    print('Calculation the best location for an overflow')
+
     # import relevant objects from OpenStreetMap
     cf = '["natural"~"water"]'
     osm_map = ox.graph_from_bbox(*coords, truncate_by_edge=True, retain_all=True, custom_filter=cf)
@@ -50,6 +55,7 @@ def overflow_location(nodes: pd.DataFrame, coords: list):
         id = np.argmin(dist_edges) 
     else:
         id = np.argmin(dist_nodes)
+
     return id
 
 def voronoi_area(nodes: pd.DataFrame, edges: pd.DataFrame):
@@ -93,6 +99,8 @@ def flow_and_depth(nodes: pd.DataFrame, edges: pd.DataFrame, settings:dict):
     edges = edges.copy()
 
     nodes, edges, graph = intialize(nodes, edges, settings)
+    nodes["path"] = None
+    nodes["depth"] = nodes["elevation"] - settings["min_depth"]
     end_points = settings["outfalls"]
     nodes.loc[end_points, "considered"] = True
     # Create a set of all the "to" "from" combos of the conduits for later calculations
@@ -133,11 +141,10 @@ def intialize(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
         tuple[DataFrame, DataFrame, Graph]: The node and edge datasets with the needed columns
         added, and a networkx graph of the network
     """
-
     nodes["considered"] = False
-    nodes["depth"] = nodes["elevation"] - settings["min_depth"]
     nodes["role"] = "node"
-    nodes["path"] = None
+    nodes["path_overflow"] = None
+    nodes.at[6, 'path_overflow'] = [] # only for Tuindorp, node with no edges
 
     # Some more complex pandas operations are needed to get the connection numbers in a few lines
     ruined_edges = edges.copy()
@@ -155,7 +162,6 @@ def intialize(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
              graph.add_edge(edge["from"], edge["to"], weight = 1 * abs(slope) * edge["length"])
         else:
             graph.add_edge(edge["from"], edge["to"], weight = 10 * abs(slope) * edge["length"] )
-
     return nodes, edges, graph
 
 
@@ -171,7 +177,6 @@ def determine_path(graph: nx.Graph, start: int, ends: list[int]):
     Returns:
         list[int]: The indicies of the nodes which the shortes path passes through
     """
-
     shortest_length = np.inf
     best_path = []
 
@@ -201,6 +206,22 @@ def set_paths(nodes: pd.DataFrame, path: list):
 
         if not nodes.loc[node, "path"]:
             nodes.at[node, "path"] = path[i:]
+
+    return nodes
+
+def set_paths_overflow(nodes: pd.DataFrame, path: list):
+    """Determine the path to the overflow for each node, and add this to the node data
+
+    Args:
+        nodes (DataFrame): The node data for a network
+        path (list[int]): The indicies of the nodes which a path passes through
+
+    Returns:
+        DataFrame: Node data with the relevant path values updated
+    """
+    for i, node in enumerate(path):
+        if not nodes.loc[node, "path_overflow"]:
+            nodes.at[node, "path_overflow"] = path[i:]
 
     return nodes
 
@@ -261,7 +282,6 @@ def uphold_max_slope(nodes: pd.DataFrame, edges: pd.DataFrame,\
             if abs(nodes.at[lower_node, "depth"] - nodes.at[higher_node, "depth"])\
                  / length > max_slope:
                 nodes.at[higher_node, "depth"] = nodes.at[lower_node, "depth"] + length * max_slope
-
     return nodes
 
 
@@ -355,8 +375,8 @@ def flow_amount(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
 
 
 def diameter_calc(edges: pd.DataFrame, diam_list: list[float]):
-    """Determine the needed diameter for the conduits from a given list of diameters using the
-    calculate flow amount
+    """Sets all diameters to the smallest available size, unless it has 0 flow. 
+       Exact conduit sizes will be calculated later
 
     Args:
         edges (DataFrame): The conduit data for a network
@@ -368,28 +388,24 @@ def diameter_calc(edges: pd.DataFrame, diam_list: list[float]):
     """
 
     edges["diameter"] = None
-
     for i, edge in edges.iterrows():
-        precise_diam = np.sqrt(4 * edge["flow"] / np.pi)
-
         if edge["flow"] == 0:
-            edges.at[i, "diameter"] = 0
-
-        # Special case if the precise diameter is larger than the largest given diameter
-        elif precise_diam > diam_list[-1]:
-            edges.at[i, "diameter"] = diam_list[-1]
-            print(f"WARNING: Conduit between node {int(edge['from'])} and {int(edge['to'])} \
-requires a larger diameter than is available ({round(precise_diam, 3)} m). \
-Capped to {diam_list[-1]}")
-
+            edges.at[i, "diameter"] = diam_list[0]
         else:
-            for size in diam_list:
-                if size - precise_diam > 0:
-                    edges.at[i, "diameter"] = size
-
-                    break
-
+            edges.at[i, "diameter"] = diam_list[0]
     return edges
+
+
+def pump_capacity(edges: pd.DataFrame, settings: dict, area: float):
+    edges["volume"] = None
+    for i, _ in edges.iterrows():
+        edges.at[i, "volume"] = 0.25 * np.pi * (edges.at[i, "diameter"])**2 * edges.at[i, "length"]
+    volume = edges.volume.sum()
+    discharge = volume / 12
+    settings["pump_capacity"] = discharge
+    print(f'The needed pump capacity is {discharge:.2f} m^3/h, this is {discharge/area*1000:.2f} mm/h')
+    return settings
+
 
 def uphold_min_depth(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
     """Move all pipes lower so that they follow the set minimum depth.
@@ -413,7 +429,7 @@ def uphold_min_depth(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
     return nodes, edges
 
 
-def cleaner_and_trimmer(nodes: pd.DataFrame, edges: pd.DataFrame):
+def cleaner_and_trimmer(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
     """Remove the columns from the node and conduit dataframes which were only needed for the
     attribute calculations. Also round off the calculated values to realistic presicions
 
@@ -425,7 +441,8 @@ def cleaner_and_trimmer(nodes: pd.DataFrame, edges: pd.DataFrame):
         tuple[DataFrame, DataFrame]: Cleaned up nodes and conduit data
     """
 
-    nodes = nodes.drop(columns=["considered", "path", "connections"])
+    #nodes = nodes.drop(columns=["considered", "path", "connections"])
+    nodes = nodes.drop(columns=["considered", "connections"])
 
     # Special condition if data was obtained from a csv (only for testing purposes)
     if "Unnamed: 0" in nodes.keys():
@@ -447,9 +464,20 @@ def cleaner_and_trimmer(nodes: pd.DataFrame, edges: pd.DataFrame):
     edges.length = edges.length.round(decimals=2)
     edges.flow = edges.flow.round(decimals=3)
 
-    # Drop the conduits with 0 flow
-    edges = edges[edges.flow != 0]
-    edges = edges.reset_index(drop=True)
+    nodes, edges, graph = intialize(nodes, edges, settings)
+    nodes["considered"] = False
+    end_points = settings["overflows"] + [6]
+    nodes.loc[end_points, "considered"] = True
+    i = 1
+    while not nodes["considered"].all():
+        
+        for node in range(len(nodes)-1):
+            if not nodes.at[node, "considered"]:
+                path_overflow = determine_path(graph, node, settings['overflows'])
+                nodes = set_paths_overflow(nodes, path_overflow)
+                nodes.loc[path_overflow, "considered"] = True
+        i += 1
+    nodes = nodes.drop(columns=["considered", "connections"])
 
     return nodes, edges
 
@@ -467,15 +495,20 @@ def add_outfalls(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
         tuple[DataFrame, DataFrame]: The node and conduit data with extra nodes and conduits
         for the outfalls and overflows
     """
-
+    nodes2 = nodes.copy()
+    edges2 = edges.copy()
+    graph = intialize(nodes2, edges2, settings)[2]
     for outfall in settings["outfalls"]:
         new_index = len(nodes)
+        settings["to_outfall"].append(new_index)
         nodes.loc[new_index] = [nodes.at[outfall, "x"] + 5,
                                 nodes.at[outfall, "y"] + 5,
                                 nodes.at[outfall, "elevation"],
                                 0,
-                                nodes.at[outfall, "depth"],
                                 "outfall",
+                                determine_path(graph, outfall, settings["overflows"]),
+                                [],
+                                nodes.at[outfall, "depth"],
                                 0,
                                 nodes.at[outfall, "install_depth"]]
 
@@ -484,50 +517,54 @@ def add_outfalls(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
                                  1,
                                  0,
                                  settings["diam_list"][-1]]
-
+        
+    
     for overflow in settings["overflows"]:
         new_index = len(nodes)
+        settings["to_overflows"].append(new_index)
         nodes.loc[new_index] = [nodes.at[overflow, "x"] + 5,
                                 nodes.at[overflow, "y"] + 5,
                                 nodes.at[overflow, "elevation"],
                                 0,
-                                nodes.at[overflow, "depth"],
                                 "overflow",
+                                [],
+                                determine_path(graph, overflow, settings["outfalls"]),
+                                nodes.at[overflow, "depth"],
                                 0,
                                 nodes.at[overflow, "install_depth"]]
 
-        edges.loc[len(edges)] = [new_index,
-                                 overflow,
-                                 1,
-                                 0,
-                                 settings["diam_list"][-1]]
-
     return nodes, edges
 
-
-def loop(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict, type: str):
-    """Runs the main attibute calculations loop for a given network
+def path_to_conduits(nodes: pd.DataFrame, edges: pd.DataFrame):
+    """Converts all paths from a list of nodes to a list of edges 
 
     Args:
         nodes (DataFrame): The node data for a network
         edges (DataFrame): The conduit data for a network
-        settings (dict): Parameters for the network
 
     Returns:
         tuple[DataFrame, DataFrame]: The node and conduit data which the attribute values updated
     """
+    nodes["conduit_list"] = None
+    for node_index, node in nodes.iterrows():
+        path = node["path_overflow"]
+        conduit_list = []
+        for i in range(len(path)-1):
+            from_node = path[i]
+            to_node = path[i+1]
 
-    nodes, edges = flow_and_depth(nodes, edges, settings)
-    if type == "outfall":
-        nodes, edges = adjusted_area(nodes, edges)
-    nodes, edges = flow_amount(nodes, edges, settings)
-    edges = diameter_calc(edges, settings["diam_list"]) 
-    nodes, edges = uphold_min_depth(nodes, edges, settings)
+            # search for the wanted conduit, also in opposite direction, and add to conduit list
+            conduit = edges.index[(edges["from"] == from_node) & (edges["to"] == to_node)].to_list() 
+            conduit += edges.index[(edges["from"] == to_node) & (edges["to"] == from_node)].to_list()
+            if len(conduit) > 0:
+                conduit_list.append("c_" + str(conduit[0]))
 
+        # set conduit_list 
+        nodes.at[node_index, "conduit_list"] = conduit_list
     return nodes, edges
 
 
-def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict, coords: list):
+def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: dict):
     """Does the complete attribute calculation step for a given network
 
     Args:
@@ -539,32 +576,28 @@ def attribute_calculation(nodes: pd.DataFrame, edges: pd.DataFrame, settings: di
         tuple[DataFrame, DataFrame]: The node and conduit data with newly added and updated
         attribute values
     """
-    print(settings)
-    settings["overflows"] = [ overflow_location(nodes, coords) ]
-    print(settings)
     nodes, edges = centralizer(nodes, edges)
     nodes, voro = voronoi_area(nodes, nodes)
     area = nodes.area.sum()
 
-    nodes_copy = nodes.copy()
-    edges_copy = edges.copy()
-
-    nodes, edges = loop(nodes, edges, settings, "outfall")
-
-    loop_setting = settings.copy()
-    print(settings)
-    for overflow in settings["overflows"]:
-        loop_setting["outfalls"] = [overflow]
-        _, loop_edges = loop(nodes_copy, edges_copy, loop_setting, "overflow")
-
-        for i in range(len(edges)):
-            if edges.at[i, "diameter"] < loop_edges.at[i, "diameter"]:
-                edges.at[i, "diameter"] = loop_edges.at[i, "diameter"]
-                edges.at[i, "flow"] = loop_edges.at[i, "flow"]
-
-    nodes, edges = cleaner_and_trimmer(nodes, edges)
+    nodes, edges = flow_and_depth(nodes, edges, settings)
+    nodes, edges = adjusted_area(nodes, edges)
+    nodes, edges = flow_amount(nodes, edges, settings)
+    edges = diameter_calc(edges, settings["diam_list"])
+    nodes, edges = uphold_min_depth(nodes, edges, settings)
+    nodes, edges = cleaner_and_trimmer(nodes, edges, settings)
+    settings["to_overflows"] = []
+    settings["to_outfall"] = []
     nodes, edges = add_outfalls(nodes, edges, settings)
-
+    nodes, edges = path_to_conduits(nodes, edges)
+    settings = terminal.step_3_input(settings)
+    swmm_file_creator(nodes, edges, voro, settings, pump=False)
+    edges = attr_sizing(settings["filename"], nodes, edges, settings)
+    settings = pump_capacity(edges, settings, area)
+    # remove conduit to outfall to make room for pump-conduit
+    edges = edges[edges['from'] != settings['outfalls'][0]]
+    # remake swmm file with pump
+    swmm_file_creator(nodes, edges, voro, settings, pump=True)
     return nodes, edges, voro
 
 def tester():

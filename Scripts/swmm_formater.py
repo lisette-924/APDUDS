@@ -13,7 +13,7 @@ from datetime import datetime
 import pandas as pd
 from numpy import abs
 
-def swmm_file_creator(nodes: pd.DataFrame, edges: pd.DataFrame, voro, settings: dict):
+def swmm_file_creator(nodes: pd.DataFrame, edges: pd.DataFrame, voro, settings: dict, pump: bool):
     """Creates a .txt file which follows the System Water Management Model format (SWMM),
     so that the created network can be used in that software
 
@@ -58,8 +58,19 @@ def swmm_file_creator(nodes: pd.DataFrame, edges: pd.DataFrame, voro, settings: 
         conduits = create_conduits(edges)
         file.write('\n'.join(conduits))
 
-        xsections = create_cross_section(edges)
+        if pump:
+            pump = create_pump(edges, settings)
+            file.write('\n'.join(pump))
+
+        weirs = create_weirs(settings)
+        file.write('\n'.join(weirs))
+
+        xsections = create_cross_section(edges, settings)
         file.write('\n'.join(xsections))
+
+        if pump:
+            pump_curve = create_pump_curve(settings)
+            file.write('\n'.join(pump_curve))
 
         timeseries = create_timeseries(settings, date)
         file.write('\n'.join(timeseries))
@@ -283,8 +294,44 @@ InOffset   OutOffset  InitFlow   MaxFlow",
     conduits.append("\n")
     return conduits
 
+def create_pump(edges: pd.DataFrame, settings: dict):
+    pumps = ["[PUMPS]",
+            ";;Name           From Node        To Node          Pump Curve       Status   Sartup Shutoff", \
+            ";;-------------- ---------------- ---------------- ---------------- ------ -------- --------"
+            ]
+    outfall_id = settings['to_outfall'][0]
+    pump = "p_0" + 14 * " "
+    pump += "j_" + str(settings["outfalls"][0]) + (17 - 2 - len(str(settings["outfalls"][0]))) * " "
+    pump += "j_" + str(outfall_id) + (17 - 2 - len(str(outfall_id))) * " "
+    pump += "pump             ON       0        0"
+    pumps.append(pump)
+    pumps.append("\n")
+    return pumps
 
-def create_cross_section(edges: pd.DataFrame):
+def create_weirs(settings: dict):
+    weirs = ["[WEIRS]", 
+             ";;Name           From Node        To Node          Type         CrestHt    \
+                Qcoeff     Gated    EndCon   EndCoeff   Surcharge  RoadWidth  RoadSurf   Coeff. Curve",
+             ";;-------------- ---------------- ---------------- ------------ ---------- ---------- \
+                -------- -------- ---------- ---------- ---------- ---------- ----------------"]
+    overflows = settings["overflows"]
+    to_overflow = settings["to_overflows"]
+    height_crest = settings['height']
+    for i in range(len(settings['overflows'])):
+        weir = "w_" + str(i) + (17 -2 -len(str(i))) * " "
+        weir += "j_" + str(overflows[i]) + (17 -2 -len(str(overflows[i]))) * " "
+        weir += "j_" + str(to_overflow[i]) + (17 -2 - len(str(to_overflow[i]))) * " "
+        weir += "TRANSVERSE" + 7 * " "
+        weir += str(height_crest[i]) + (17 - len(str(height_crest[i]))) * " "
+        weir += "1.70       NO       0        0          YES"
+
+        weirs.append(weir)
+    weirs.append("\n")
+    return weirs
+
+
+
+def create_cross_section(edges: pd.DataFrame, settings: dict):
     """Returns a list of strings for the xsections section"""
 
     xsections = ["[XSECTIONS]",
@@ -298,10 +345,28 @@ Geom4      Barrels    Culvert",
         x_sec += "CIRCULAR     "
         x_sec += str(edge.diameter) + (17 - len(str(edge.diameter))) * " "
         x_sec += "0          0          0          1"
-
         xsections.append(x_sec)
+
+    length = settings['length']
+    for i in range(len(settings['overflows'])):
+        weir = "w_" + str(i) + (17 -2 -len(str(i))) * " "
+        weir += "RECT_OPEN    1                "
+        weir += str(length[i]) + (17 - len(str(length[i]))) * " "
+        weir += "0          0"
+        xsections.append(weir)
+        
     xsections.append("\n")
     return xsections
+
+def create_pump_curve(settings: dict):
+    pump_curves = ["[CURVES]", ";;Name           Type       X-Value    Y-Value",   \
+                    ";;-------------- ---------- ---------- ----------"]
+    capacity = str(settings["pump_capacity"] / 3600)
+    pump_curve = "pump             Pump1      2400       "
+    pump_curve += capacity
+    pump_curves.append(pump_curve)
+    pump_curves.append("\n")
+    return pump_curves
 
 
 def create_timeseries(settings: dict, date: str):

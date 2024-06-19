@@ -16,8 +16,11 @@ This file contains the following major functions:
     * tester - Only used for testing purposes
 """
 import osmnx as ox
+from matplotlib import pyplot as plt
 from numpy import (cos, sin, pi, array)
 from vg import angle
+from attribute_calculator import overflow_location
+from plotter import network_plotter
 
 def area_check(coords: list[float], threshold: int):
     """Checks wether a given area is larger than a certain threshold of km^2,
@@ -58,7 +61,7 @@ If you enter no, you may enter new coordinates.")
             print("\n")
             coords = []
             coords, _ = coords_input()
-    
+    print(f'Area of catchement: {area} km2')
     return area, coords
 
 
@@ -103,15 +106,6 @@ def coords_input() -> list[float]:
         print("\nThe input was not in the correct format (ex: 51.592)\nPlease try again:\n")
         coords = coords_input()
 
-    # Check presence of water within coordinates
-    try:
-        ox.graph_from_bbox(*coords, truncate_by_edge=True, retain_all=True, custom_filter="['natural'~'water']")
-
-    except ValueError:
-        print("\nThere is no water found in the given area, so no overflow can be placed\n")
-        print("Please try again with different coordinates:\n")
-        coords = coords_input()
-
     # If north was entered in the south entry space, swap them
     if coords[0] < coords[1]:
         coords[0], coords[1] = coords[1], coords[0]
@@ -148,6 +142,63 @@ def manhole_space_input() -> int:
 
     return space
 
+def overflow_choice(nodes, edges, coords, settings):
+    try:
+        ox.graph_from_bbox(*coords, truncate_by_edge=True, retain_all=True, custom_filter="['natural'~'water']")
+
+    except ValueError:
+        print("\nThere is no water found in the given area, so the software cannot find a good location.")
+        print("\nPlease enter the number (integer) of the node you want to place the overflow at once the figure is closed:\n")
+        network_plotter(nodes, edges, 111, True)
+        plt.show(block=True)
+        settings['overflows'] = [ int(input("Node for overflow: ")) ]
+
+    else:
+        node = overflow_location(nodes, coords)
+        print(f"\nThe software determined node {node} is the best location for an overflow.")
+        network_plotter(nodes, edges, 111, True)
+        print("\nAre you satisfied with this location? If not, you will be able to enter the node id of \
+        your preferred location after closing the figure")
+        plt.show(block=True)
+        choice = yes_no_choice()
+        if choice == 'n':
+            print("\nYou have choosen to chose an overflow location yourself, please fill in the node id:")
+            settings['overflows'] = [ int(input("Node for overflow: ")) ]
+        else:
+            settings['overflows'] = [ node ]
+            print('overflow_choice', settings["overflows"])
+
+    finally:    
+        print("\nPlease enter the dimensions of the overflow, the crest height and width")
+        settings["height"] = []
+        settings["length"] = []
+        try:
+            settings['height'].append(float(input("Crest height in meter (ex: 0.5): ")))
+
+        except ValueError:
+            print("\nThe input was not in the correct format (ex: 0.5)\nPlease try again:\n")
+            settings['height'].append(float(input("Crest height in meter (ex: 0.5): ")))
+
+        try:
+            settings['length'].append(float(input("Width in meter (ex: 10): ")))
+
+        except ValueError:
+            print("\nThe input was not in the correct format (ex: 10)\nPlease try again:\n")
+            settings['height'].append(float(input("Width in meter (ex: 10): ")))
+
+def outfall_choice(nodes, edges, settings): 
+    node = nodes.elevation.idxmin()   
+    print(f"\nThe software determined node {node} is the best location for an outfall.")
+    network_plotter(nodes, edges, 111, True)
+    print("\nAre you satisfied with this location? Close the figure to enter your answer.\
+    If you are not satisfied, you will be able to enter the node id of your preferred location")
+    plt.show(block=True)
+    choice = yes_no_choice()
+    if choice == 'n':
+        print("\nYou have choosen to chose an outfall location yourself, please fill in the node id:")
+        settings['outfalls'] = [ int(input("Node for outfall: ")) ]
+    else:
+        settings['outfalls'] = [ node ]
 
 def step_1_input():
     """Create the explanations and input space for the network creation step of the software
@@ -209,6 +260,9 @@ imperviousness will be created. From this one network can be selected and export
         settings = standard_input()
     elif choice == "y":
         settings = variant_input()
+    print("\n\nA name for the SWMM file. This file will be a .txt file.\n\
+The filename cannot contain any spaces or quotes (for example: test_file)\n")
+    settings["filename"] = input("File name: ")
  
 
     return settings
@@ -342,6 +396,7 @@ Make sure to enter in a correct format, as can be seen above in the example")
                 continue    
             else:
                 break
+            
 
         print("\n\nThe average percentage of impervious ground coverage of the area:\n\
 Meaning the percentage of any type of surface that does not absorb rainfall \n\
@@ -355,7 +410,19 @@ Meaning the percentage of any type of surface that does not absorb rainfall \n\
                 continue    
             else:
                 break
-   
+
+
+    print("\n\nA timeseries will be created from your given design storm value.\n\
+Please specify the duration of this design storm in whole hours (for example: 2, max 12)\n")   
+    while True:
+        try:
+            settings["duration"] = int(input("Design storm duration [hours]: "))
+        except ValueError:
+            print(f"\n The value you entered is incorrect, please try again. \n\
+Make sure to enter in a correct format, as can be seen above in the example")
+            continue    
+        else:
+            break
     return settings
 
 
@@ -396,8 +463,7 @@ Make sure to enter in a correct format, as can be seen above in the example")
         else:
             break
 
-            
-
+        
     print("\nThe minimum depth below the ground at which conduits can be installed:\n\
 (Should be a positive integer or decimal number, for example: 1.1)\n")
     while True:
@@ -467,6 +533,18 @@ Make sure to enter in a correct format, as can be seen above in the example")
         else:
             break
 
+    print("\n\nA timeseries will be created from your given design storm value.\n\
+Please specify the duration of this design storm in whole hours (for example: 2, max 12)\n")   
+    while True:
+        try:
+            settings["duration"] = int(input("Design storm duration [hours]: "))
+        except ValueError:
+            print(f"\n The value you entered is incorrect, please try again. \n\
+Make sure to enter in a correct format, as can be seen above in the example")
+            continue    
+        else:
+            break
+
     print("\nA list of the available diameters of the conduits:\n\
 (Should be a series of number separated by spaces, for example: 150 300 500 1000)\n")
     while True:
@@ -487,27 +565,7 @@ def step_3_input(settings: dict):
     """Create the explanations and input space for the SWMM file creation step of the software
     """
 
-    print("\n\nIf you are satisfied with the system that has been constructed,\n\
-you can convert it into a System Water Management Model (SWMM) file. To do this,\n\
-please give some final specifications:")
-
-    print("\n\nA timeseries will be created from your given design storm value.\n\
-Please specify the duration of this design storm in whole hours (for example: 2, max 12)\n")   
-    while True:
-        try:
-            settings["duration"] = int(input("Design storm duration [hours]: "))
-        except ValueError:
-            print(f"\n The value you entered is incorrect, please try again. \n\
-Make sure to enter in a correct format, as can be seen above in the example")
-            continue    
-        else:
-            break
-
-    print("\n\nA name for the SWMM file. This file will be a .txt file.\n\
-The filename cannot contain any spaces or quotes (for example: test_file)\n")
-    settings["filename"] = input("File name: ")
-
-    print("\n\nLastly, it is possible to show the subcatchment polygons in SWMM.\n\
+    print("\n\nIt is possible to show the subcatchment polygons in SWMM.\n\
 Doing this for larger networks however may make the network difficult to view.\n\
 Do you want to include the subcatchment polygons?\n")
     settings["polygons"] = yes_no_choice()
@@ -515,9 +573,6 @@ Do you want to include the subcatchment polygons?\n")
     print("\n\nThe file will now be created, and can be found in the main folder of \
 APDUDS.\nPlease note, that in order to open this file in SWMM, you will need to select\n\
 the 'all files' option in the folder explorer to be able to see the file in the directory.")
-
-    print("\nThis concludes this use session of APDUDS, \
-the software will close once the file has been created.")
 
     return settings
 
